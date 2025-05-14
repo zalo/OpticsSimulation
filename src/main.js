@@ -2,14 +2,8 @@ import * as THREE from '../node_modules/three/build/three.module.js';
 import { GUI } from '../node_modules/three/examples/jsm/libs/lil-gui.module.min.js';
 import World from './World.js';
 import { TransformControls } from '../node_modules/three/examples/jsm/controls/TransformControls.js';
-import { GLTFLoader } from '../node_modules/three/examples/jsm/loaders/GLTFLoader.js';
-import { Pass, FullScreenQuad } from '../node_modules/three/examples/jsm/postprocessing/Pass.js';
-import { CopyShader } from '../node_modules/three/examples/jsm/shaders/CopyShader.js';
-import { EffectComposer } from '../node_modules/three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from '../node_modules/three/examples/jsm/postprocessing/RenderPass.js';
-import { OutputPass } from '../node_modules/three/examples/jsm/postprocessing/OutputPass.js';
+import PhysicalDoFCamera from './PhysicalDoFCamera.js';
 import { RGBELoader } from '../node_modules/three/examples/jsm/loaders/RGBELoader.js';
-import { frameCorners } from '../node_modules/three/examples/jsm/utils/CameraUtils.js';
 
 /** The fundamental set up and animation structures for Simulation */
 export default class Main {
@@ -29,51 +23,18 @@ export default class Main {
         // Configure Settings
         this.simulationParams = {
             numViews: 4,
-            resolution: 1024,
+            resolution: 4096,
             aperture: 0.05,
             focalDistance: 1.73,
         };
         this.gui = new GUI();
-        this.gui.add(this.simulationParams, 'numViews', 1, 10, 1).name('Number of Views');//.onChange((value) => { this.setupPhotodiodes(); });
-        this.gui.add(this.simulationParams, 'resolution', 256, 2048, 256).name('Resolution');
-        this.gui.add(this.simulationParams, 'aperture', 0.0, 1.0, 0.01).name('Aperture Size');
-        this.gui.add(this.simulationParams, 'focalDistance', 0.0, 10.0, 0.01).name('Focal Distance');
+        this.gui.add(this.simulationParams, 'numViews', 1, 10, 1).name('Number of Views')           .onChange((value) => { this.physicalCamera.numViews      = value; this.physicalCamera.setupCamera(); });
+        this.gui.add(this.simulationParams, 'resolution', 256, 4096, 256).name('Resolution')        .onChange((value) => { this.physicalCamera.resolution    = value; this.physicalCamera.setupCamera(); });
+        this.gui.add(this.simulationParams, 'aperture', 0.0, 1.0, 0.01).name('Aperture Size')       .onChange((value) => { this.physicalCamera.aperture      = value; this.physicalCamera.setupCamera(); });
+        this.gui.add(this.simulationParams, 'focalDistance', 0.4, 5.0, 0.01).name('Focal Distance').onChange((value) => { this.physicalCamera.focalDistance = value; this.physicalCamera.setupCamera(); });
 
         // Construct the render world
         this.world = new World(this);
-
-        let aspect =  window.innerWidth / window.innerHeight;
-
-        let bottomLeftCorner  = new THREE.Vector3( -0.6 * aspect, -0.6, -1.0 ).multiplyScalar( this.simulationParams.focalDistance );
-        let bottomRightCorner = new THREE.Vector3(  0.6 * aspect, -0.6, -1.0 ).multiplyScalar( this.simulationParams.focalDistance );
-        let topLeftCorner     = new THREE.Vector3( -0.6 * aspect,  0.6, -1.0 ).multiplyScalar( this.simulationParams.focalDistance );
-        this.renderCameras = [];
-        for ( let y = 0; y < this.simulationParams.numViews; y++ ) {
-            for ( let x = 0; x < this.simulationParams.numViews; x++ ) {
-                let subcamera = new THREE.PerspectiveCamera(60, aspect, 0.1, 10.0);
-                let xRes = this.simulationParams.resolution;
-                let yRes = this.simulationParams.resolution;
-                subcamera.viewport = new THREE.Vector4( Math.floor( x * xRes ),
-                                                        Math.floor( y * yRes ),
-                                                        Math.ceil( xRes ),
-                                                        Math.ceil( yRes ) );
-
-                subcamera.position.x = (( x / this.simulationParams.numViews ) - 0.5) * this.simulationParams.aperture;
-                subcamera.position.y = (( y / this.simulationParams.numViews ) - 0.5) * this.simulationParams.aperture;
-                subcamera.position.z = 0;
-                subcamera.updateMatrixWorld();
-
-                // TODO: Set the off-axis camera matrix using the kooima method
-                frameCorners( subcamera, bottomLeftCorner, bottomRightCorner, topLeftCorner, true );
-
-                this.renderCameras.push( subcamera );
-            }
-        }
-        this.arraycamera = new THREE.ArrayCamera( this.renderCameras );
-        this.world.camera.add( this.arraycamera );
-        for ( let i = 0; i < this.renderCameras.length; i++ ) {
-            this.arraycamera.add(this.renderCameras[i]);
-        }
 
 		new RGBELoader()
 			.setPath('assets/')
@@ -81,28 +42,87 @@ export default class Main {
 				texture.mapping = THREE.EquirectangularReflectionMapping;
 				this.world.scene.background = texture;
 				this.world.scene.environment = texture;
+
+                this.physicalCamera = new PhysicalDoFCamera(this.world.renderer, this.world.scene, this.world.camera);
+                window.addEventListener(           'resize', () => { this.physicalCamera.setupCamera(); }, false);
+                window.addEventListener('orientationchange', () => { this.physicalCamera.setupCamera(); }, false);
+
+                // Create a new ShaderMaterial that raytraces against a biconvex lens
+                this.raytracedShaderMaterial = new THREE.ShaderMaterial( {
+                    uniforms: {
+                        //map                 : { value: eyeRenderTarget.texture     },
+                        //envMap   : { value: this.world.scene.background },
+                    },
+                    vertexShader  : `
+                        varying vec3 vWorldPosition;
+                        void main() {
+                            #include <begin_vertex>
+                            #include <project_vertex>
+                            vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+                        }`,
+                    fragmentShader: `
+                        uniform samplerCube envMap;
+                        varying vec3 vWorldPosition;
+
+                        bool raytraceSphere( vec3 rayOrigin, vec3 rayDirection, vec3 center, float radius, out float t ) {
+                            vec3 oc = rayOrigin - center;
+                            float a = dot( rayDirection, rayDirection );
+                            float b = 2.0 * dot( oc, rayDirection );
+                            float c = dot( oc, oc ) - radius * radius;
+                            float discriminant = b * b - 4.0 * a * c;
+                            if ( discriminant < 0.0 ) {
+                                return false;
+                            } else {
+                                t = (-b - sqrt( discriminant )) / (2.0 * a);
+                                return true;
+                            }
+                        }
+                        
+                        void reflectOffSphere( inout vec3 rayOrigin, inout vec3 rayDirection, vec3 center, float radius ) {
+                            float t = 0.0;
+                            if ( raytraceSphere( rayOrigin, rayDirection, center, radius, t ) && t > 0.0 ) {
+                                rayOrigin = rayOrigin + t * rayDirection;
+                                rayDirection = reflect( rayDirection, normalize( rayOrigin - center ) );
+                            }
+                        }
+
+                        void main() {
+                            vec3 rayDirection = normalize(vWorldPosition - cameraPosition );
+                            vec3 rayOrigin    = cameraPosition;
+
+                            reflectOffSphere( rayOrigin, rayDirection, vec3(  0.25, 0.0, 0.0 ), 0.25);
+                            reflectOffSphere( rayOrigin, rayDirection, vec3( -0.25, 0.0, 0.0 ), 0.25);
+
+                            gl_FragColor = texture( envMap, rayDirection );
+
+                            #include <tonemapping_fragment>
+                            #include <colorspace_fragment>
+                            #include <fog_fragment>
+                            #include <premultiplied_alpha_fragment>
+                            #include <dithering_fragment>
+                        }`
+                } );
+
+                // Create a plane to render the raytraced shader material
+                this.planeGeometry = new THREE.SphereGeometry( 0.5, 32, 32 );
+                this.mesh = new THREE.Mesh( this.planeGeometry, this.raytracedShaderMaterial );
+                this.world.scene.add( this.mesh );
+
 			});
 
-        // Make Effect Composer
-        this.composer = new EffectComposer( this.world.renderer );
-        this.composer.setSize( this.simulationParams.resolution * (this.simulationParams.numViews), 
-                               this.simulationParams.resolution * (this.simulationParams.numViews) );
-        this.composer.setPixelRatio( this.world.renderer.getPixelRatio() );
-        this.composer.addPass( new RenderPass( this.world.scene, this.arraycamera ) );
-        this.composer.addPass( new AveragingPass() );
-        this.composer.passes[ 1 ].uniforms.views.value = this.simulationParams.numViews;
-        this.composer.passes[ 1 ].uniforms.renderToScreen = true;
-        this.composer.addPass( new OutputPass() );
+
     }
 
     /** Update the simulation */
     update(timeMS) {
-        this.deltaTime = timeMS - this.timeMS;
-        this.timeMS = timeMS;
-        this.world.controls.update();
-        this.composer.render( this.deltaTime / 1000.0 );
-        //this.world.renderer.render(this.world.scene, this.arraycamera);
-        this.world.stats.update();
+        if(this.physicalCamera){
+            this.deltaTime = timeMS - this.timeMS;
+            this.timeMS = timeMS;
+            this.world.controls.update();
+            this.physicalCamera.render( this.deltaTime / 1000.0 );
+            //this.world.renderer.render(this.world.scene, this.world.camera);
+            this.world.stats.update();
+        }
     }
 
     // Log Errors as <div>s over the main viewport
@@ -116,62 +136,6 @@ export default class Main {
         errorNode.innerHTML = text.fontcolor("red");
         window.document.getElementById("info").appendChild(errorNode);
     }
-}
-
-class AveragingPass extends Pass {
-	constructor( ) {
-		super();
-		this.uniforms = { 'tDiffuse': { value: null }, 'views': { value: 10 } };
-		this.material = new THREE.ShaderMaterial( {
-			uniforms: this.uniforms,
-			vertexShader: `
-                varying vec2 vUv;
-                void main() {
-                    vUv = uv;
-                    gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
-                }`,
-			fragmentShader: `
-                varying vec2 vUv;
-                uniform sampler2D tDiffuse;
-                uniform int views;
-                void main() {
-                    vec4 averageColor = vec4(0.0, 0.0, 0.0, 0.0);
-                    for (int i = 0; i < views; i++) {
-                        for (int j = 0; j < views; j++) {
-                            vec2 cellUV = (vUv + vec2(float(i), float(j))) / float(views);
-                            averageColor += texture2D( tDiffuse, cellUV );
-                        }
-                    }
-                    gl_FragColor = averageColor / float(views * views);
-                    //gl_FragColor    = texture2D( tDiffuse, vUv );
-                }`
-		} );
-
-		this.copyFsMaterial = new THREE.ShaderMaterial( {
-			uniforms: THREE.UniformsUtils.clone( CopyShader.uniforms ),
-			vertexShader: CopyShader.vertexShader,
-			fragmentShader: CopyShader.fragmentShader,
-			blending: THREE.NoBlending,
-			depthTest: false,
-			depthWrite: false
-		} );
-		this.fsQuad     = new FullScreenQuad( this.material );
-	}
-	render( renderer, writeBuffer, readBuffer /*, deltaTime, maskActive */ ) {
-		this.uniforms[ 'tDiffuse' ].value = readBuffer.texture;
-		if ( this.renderToScreen ) {
-			renderer.setRenderTarget( null );
-			this.fsQuad.render( renderer );
-		} else {
-			renderer.setRenderTarget( writeBuffer );
-			if ( this.clear ) renderer.clear();
-			this.fsQuad.render( renderer );
-		}
-	}
-	dispose() {
-		this.material.dispose();
-		this.fsQuad.dispose();
-	}
 }
 
 var main = new Main();

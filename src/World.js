@@ -114,26 +114,4 @@ export default class World {
         this.renderer.setSize(width, height);
     }
 
-    scaleScene(scale){
-        this.ground.scale.set(scale, scale, scale);
-        this.ground.position.y = -0.75 * scale;
-        this.helper.scale.set(scale, scale, scale);
-        this.helper.position.y = -0.74 * scale;
-        this.camera.position.multiplyScalar(scale);
-        this.controls.target.set(0, 0.5 * scale, 0);
-        this.camera.near *= scale;
-        this.camera.far  *= scale;
-
-        this.dirLight.shadow.camera.near    *= scale;
-        this.dirLight.shadow.camera.far     *= scale;
-        this.dirLight.shadow.camera.right   *= scale;
-        this.dirLight.shadow.camera.left    *= scale;
-        this.dirLight.shadow.camera.top	    *= scale;
-        this.dirLight.shadow.camera.bottom  *= scale;
-        this.spotLight.position.multiplyScalar(scale);
-        this.spotLight.distance             *= scale;
-        //this.spotLight.shadow.camera.near   *= scale;
-        this.spotLight.shadow.camera.far    *= scale;
-    }
-
 }

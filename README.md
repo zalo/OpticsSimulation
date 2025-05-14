@@ -1,4 +1,4 @@
-# [OpticsSimulation](https://crispy-adventure-qrr5ngk.pages.github.io/)
+# [OpticsSimulation](https://zalo.github.io/OpticsSimulation/)
 
 <p align="left">
   <a href="https://github.com/zalo/OpticsSimulation/deployments/activity_log?environment=github-pages">

@@ -26,12 +26,14 @@ export default class Main {
             resolution: 4096,
             aperture: 0.05,
             focalDistance: 1.73,
+            refractiveIndex: 1.4,
         };
         this.gui = new GUI();
         this.gui.add(this.simulationParams, 'numViews', 1, 10, 1).name('Number of Views')           .onChange((value) => { this.physicalCamera.numViews      = value; this.physicalCamera.setupCamera(); });
         this.gui.add(this.simulationParams, 'resolution', 256, 4096, 256).name('Resolution')        .onChange((value) => { this.physicalCamera.resolution    = value; this.physicalCamera.setupCamera(); });
-        this.gui.add(this.simulationParams, 'aperture', 0.0, 1.0, 0.01).name('Aperture Size')       .onChange((value) => { this.physicalCamera.aperture      = value; this.physicalCamera.setupCamera(); });
+        this.gui.add(this.simulationParams, 'aperture', 0.0, 0.1, 0.01).name('Aperture Size')       .onChange((value) => { this.physicalCamera.aperture      = value; this.physicalCamera.setupCamera(); });
         this.gui.add(this.simulationParams, 'focalDistance', 0.4, 5.0, 0.01).name('Focal Distance').onChange((value) => { this.physicalCamera.focalDistance = value; this.physicalCamera.setupCamera(); });
+        this.gui.add(this.simulationParams, 'refractiveIndex', 1.0, 2.0, 0.01).name('Refractive Index').onChange((value) => { this.raytracedShaderMaterial.uniforms.refractiveIndex.value = value; });
 
         // Construct the render world
         this.world = new World(this);
@@ -49,7 +51,9 @@ export default class Main {
 
                 // Create a new ShaderMaterial that raytraces against a biconvex lens
                 this.raytracedShaderMaterial = new THREE.ShaderMaterial( {
+                    side: THREE.DoubleSide,
                     uniforms: {
+                        refractiveIndex: { value: 1.4 },
                         //map                 : { value: eyeRenderTarget.texture     },
                         //envMap   : { value: this.world.scene.background },
                     },
@@ -62,6 +66,7 @@ export default class Main {
                         }`,
                     fragmentShader: `
                         uniform samplerCube envMap;
+                        uniform float refractiveIndex;
                         varying vec3 vWorldPosition;
 
                         bool raytraceSphere( vec3 rayOrigin, vec3 rayDirection, vec3 center, float radius, out float t ) {
@@ -70,28 +75,71 @@ export default class Main {
                             float b = 2.0 * dot( oc, rayDirection );
                             float c = dot( oc, oc ) - radius * radius;
                             float discriminant = b * b - 4.0 * a * c;
-                            if ( discriminant < 0.0 ) {
+                            if (discriminant < 0.0 ) {
                                 return false;
                             } else {
                                 t = (-b - sqrt( discriminant )) / (2.0 * a);
-                                return true;
+                                return t > 0.0;
                             }
                         }
                         
                         void reflectOffSphere( inout vec3 rayOrigin, inout vec3 rayDirection, vec3 center, float radius ) {
                             float t = 0.0;
-                            if ( raytraceSphere( rayOrigin, rayDirection, center, radius, t ) && t > 0.0 ) {
+                            if ( raytraceSphere( rayOrigin, rayDirection, center, radius, t ) ) {
                                 rayOrigin = rayOrigin + t * rayDirection;
                                 rayDirection = reflect( rayDirection, normalize( rayOrigin - center ) );
                             }
+                        }
+
+                        void refractBiconvexLens( inout vec3 rayOrigin, inout vec3 rayDirection, float refractiveIndex, vec3 c1, float r1, vec3 c2, float r2 ) {
+                            float t = 0.0;
+                            if ( raytraceSphere( rayOrigin, rayDirection, c1, r1, t ) ) {
+                                rayOrigin = rayOrigin + t * rayDirection;
+                                if( length(rayOrigin - c2) < r2 ) {
+                                    vec3 normal = normalize( rayOrigin - c1 );
+                                    vec3 refractedRay = refract( rayDirection, normal, 1.0 / refractiveIndex );
+                                    if ( refractedRay != vec3(0.0) ) {
+                                        rayDirection = refractedRay;
+                                        if ( raytraceSphere( rayOrigin, rayDirection, c2, r2, t ) ) {
+                                            rayOrigin = rayOrigin + t * rayDirection;
+                                            normal = normalize( rayOrigin - c2 );
+                                            refractedRay = refract( rayDirection, normal, refractiveIndex / 1.0 );
+                                            if ( refractedRay != vec3(0.0) ) {
+                                                rayDirection = refractedRay;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if ( raytraceSphere( rayOrigin, rayDirection, c2, r2, t ) ) {
+                                rayOrigin = rayOrigin + t * rayDirection;
+                                if( length(rayOrigin - c1) < r1 ) {
+                                    vec3 normal = normalize( rayOrigin - c2 );
+                                    vec3 refractedRay = refract( rayDirection, normal, 1.0 / refractiveIndex );
+                                    if ( refractedRay != vec3(0.0) ) {
+                                        rayDirection = refractedRay;
+                                        if ( raytraceSphere( rayOrigin, rayDirection, c1, r1, t ) ) {
+                                            rayOrigin = rayOrigin + t * rayDirection;
+                                            normal = normalize( rayOrigin - c1 );
+                                            refractedRay = refract( rayDirection, normal, refractiveIndex / 1.0 );
+                                            if ( refractedRay != vec3(0.0) ) {
+                                                rayDirection = refractedRay;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                         }
 
                         void main() {
                             vec3 rayDirection = normalize(vWorldPosition - cameraPosition );
                             vec3 rayOrigin    = cameraPosition;
 
-                            reflectOffSphere( rayOrigin, rayDirection, vec3(  0.25, 0.0, 0.0 ), 0.25);
-                            reflectOffSphere( rayOrigin, rayDirection, vec3( -0.25, 0.0, 0.0 ), 0.25);
+                            //reflectOffSphere( rayOrigin, rayDirection, vec3(  0.25, 0.0, 0.0 ), 0.25);
+                            //reflectOffSphere( rayOrigin, rayDirection, vec3( -0.25, 0.0, 0.0 ), 0.25);
+                            refractBiconvexLens( rayOrigin, rayDirection, refractiveIndex, vec3( 0.4, 0.0, 0.0 ), 0.5, vec3( -0.4, 0.0, 0.0 ), 0.5 );
 
                             gl_FragColor = texture( envMap, rayDirection );
 
@@ -109,8 +157,6 @@ export default class Main {
                 this.world.scene.add( this.mesh );
 
 			});
-
-
     }
 
     /** Update the simulation */

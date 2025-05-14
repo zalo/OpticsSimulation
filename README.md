@@ -9,7 +9,7 @@
       <img src="https://img.shields.io/github/license/zalo/OpticsSimulation" title="License: MIT"></a>
 </p>
 
-A simple simulator for the LED photodiode system.
+WIP A simple testbed for physically accurate raytraced display optics simulation.
 
  # Building
 

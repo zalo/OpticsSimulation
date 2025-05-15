@@ -69,38 +69,35 @@ export default class Main {
                         uniform float refractiveIndex;
                         varying vec3 vWorldPosition;
 
-                        bool raytraceSphere( vec3 rayOrigin, vec3 rayDirection, vec3 center, float radius, out float t ) {
-                            vec3 oc = rayOrigin - center;
-                            float a = dot( rayDirection, rayDirection );
-                            float b = 2.0 * dot( oc, rayDirection );
-                            float c = dot( oc, oc ) - radius * radius;
-                            float discriminant = b * b - 4.0 * a * c;
-                            if (discriminant < 0.0 ) {
-                                return false;
-                            } else {
-                                t = (-b - sqrt( discriminant )) / (2.0 * a);
-                                return t > 0.0;
-                            }
+                        bool intersectRaySphere( vec3 ro, vec3 rd, vec4 sph, float isInside, out float t ) {
+                            vec3 oc = ro - sph.xyz;
+                            float b = dot(oc, rd);
+                            float c = dot(oc, oc) - sph.w * sph.w;
+                            float h = b * b - c;
+                            if (h < 0.0) { return false; }
+                            t = -b + (sqrt(h) * sign(isInside));
+                            return true;
                         }
                         
-                        void reflectOffSphere( inout vec3 rayOrigin, inout vec3 rayDirection, vec3 center, float radius ) {
+                        void reflectOffSphere( inout vec3 rayOrigin, inout vec3 rayDirection, vec4 sphereParams ) {
                             float t = 0.0;
-                            if ( raytraceSphere( rayOrigin, rayDirection, center, radius, t ) ) {
+                            if ( intersectRaySphere( rayOrigin, rayDirection, sphereParams, -1.0, t ) ) {
                                 rayOrigin = rayOrigin + t * rayDirection;
-                                rayDirection = reflect( rayDirection, normalize( rayOrigin - center ) );
+                                rayDirection = reflect( rayDirection, normalize( rayOrigin - sphereParams.xyz ) );
                             }
                         }
 
                         void refractBiconvexLens( inout vec3 rayOrigin, inout vec3 rayDirection, float refractiveIndex, vec3 c1, float r1, vec3 c2, float r2 ) {
                             float t = 0.0;
-                            if ( raytraceSphere( rayOrigin, rayDirection, c1, r1, t ) ) {
-                                rayOrigin = rayOrigin + t * rayDirection;
-                                if( length(rayOrigin - c2) < r2 ) {
+                            if ( intersectRaySphere( rayOrigin, rayDirection, vec4(c1, r1), -1.0, t ) ) {
+                                vec3 intersection = rayOrigin + t * rayDirection;
+                                if( length(intersection - c2) < r2 ) {
+                                    rayOrigin = intersection;
                                     vec3 normal = normalize( rayOrigin - c1 );
                                     vec3 refractedRay = refract( rayDirection, normal, 1.0 / refractiveIndex );
                                     if ( refractedRay != vec3(0.0) ) {
                                         rayDirection = refractedRay;
-                                        if ( raytraceSphere( rayOrigin, rayDirection, c2, r2, t ) ) {
+                                        if ( intersectRaySphere( rayOrigin, rayDirection, vec4(c2, r2), 1.0, t ) ) {
                                             rayOrigin = rayOrigin + t * rayDirection;
                                             normal = normalize( rayOrigin - c2 );
                                             refractedRay = refract( rayDirection, normal, refractiveIndex / 1.0 );
@@ -109,39 +106,37 @@ export default class Main {
                                             }
                                         }
                                     }
-                                }
-                            }
-
-                            if ( raytraceSphere( rayOrigin, rayDirection, c2, r2, t ) ) {
-                                rayOrigin = rayOrigin + t * rayDirection;
-                                if( length(rayOrigin - c1) < r1 ) {
-                                    vec3 normal = normalize( rayOrigin - c2 );
-                                    vec3 refractedRay = refract( rayDirection, normal, 1.0 / refractiveIndex );
-                                    if ( refractedRay != vec3(0.0) ) {
-                                        rayDirection = refractedRay;
-                                        if ( raytraceSphere( rayOrigin, rayDirection, c1, r1, t ) ) {
-                                            rayOrigin = rayOrigin + t * rayDirection;
-                                            normal = normalize( rayOrigin - c1 );
-                                            refractedRay = refract( rayDirection, normal, refractiveIndex / 1.0 );
-                                            if ( refractedRay != vec3(0.0) ) {
-                                                rayDirection = refractedRay;
+                                } else if ( intersectRaySphere( rayOrigin, rayDirection, vec4(c2, r2), -1.0, t ) ) {
+                                    vec3 intersection = rayOrigin + t * rayDirection;
+                                    if( length(intersection - c1) < r2 ) {
+                                        rayOrigin = intersection;
+                                        vec3 normal = normalize( rayOrigin - c2 );
+                                        vec3 refractedRay = refract( rayDirection, normal, 1.0 / refractiveIndex );
+                                        if ( refractedRay != vec3(0.0) ) {
+                                            rayDirection = refractedRay;
+                                            if ( intersectRaySphere( rayOrigin, rayDirection, vec4(c1, r1), 1.0, t ) ) {
+                                                rayOrigin = rayOrigin + t * rayDirection;
+                                                normal = normalize( rayOrigin - c1 );
+                                                refractedRay = refract( rayDirection, normal, refractiveIndex / 1.0 );
+                                                if ( refractedRay != vec3(0.0) ) {
+                                                    rayDirection = refractedRay;
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
-
                         }
 
                         void main() {
                             vec3 rayDirection = normalize(vWorldPosition - cameraPosition );
                             vec3 rayOrigin    = cameraPosition;
 
-                            //reflectOffSphere( rayOrigin, rayDirection, vec3(  0.25, 0.0, 0.0 ), 0.25);
-                            //reflectOffSphere( rayOrigin, rayDirection, vec3( -0.25, 0.0, 0.0 ), 0.25);
+                            //reflectOffSphere( rayOrigin, rayDirection, vec4(  0.25, 0.0, 0.0, 0.25);
+                            //reflectOffSphere( rayOrigin, rayDirection, vec4( -0.25, 0.0, 0.0, 0.25 ));
                             refractBiconvexLens( rayOrigin, rayDirection, refractiveIndex, vec3( 0.4, 0.0, 0.0 ), 0.5, vec3( -0.4, 0.0, 0.0 ), 0.5 );
 
-                            gl_FragColor = texture( envMap, rayDirection );
+                            gl_FragColor = texture( envMap, rayDirection ); //vec4(rayDirection, 1.0);//
 
                             #include <tonemapping_fragment>
                             #include <colorspace_fragment>

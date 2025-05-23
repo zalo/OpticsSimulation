@@ -13,7 +13,7 @@ export default class PhysicalDoFCamera {
         this.scene         = scene;
         this.baseCamera    = camera;
         this.numViews      = 4;
-        this.resolution = 4096;
+        this.resolution    = 4096;
         this.aperture      = 0.05;
         this.focalDistance = 1.73;
 
@@ -38,8 +38,8 @@ export default class PhysicalDoFCamera {
         for ( let y = 0; y < this.numViews; y++ ) {
             for ( let x = 0; x < this.numViews; x++ ) {
                 let subcamera = new THREE.PerspectiveCamera(60, aspect, 0.1, 10.0);
-                let xRes = this.resolution / this.numViews;
-                let yRes = this.resolution / this.numViews;
+                let xRes = this.renderer.getPixelRatio() * this.resolution / this.numViews;
+                let yRes = this.renderer.getPixelRatio() * this.resolution / this.numViews;
                 subcamera.viewport = new THREE.Vector4( Math.floor( x * xRes ),
                                                         Math.floor( y * yRes ),
                                                         Math.ceil( xRes ),
@@ -67,10 +67,9 @@ export default class PhysicalDoFCamera {
         this.composer.setSize( this.resolution, this.resolution );
         this.composer.setPixelRatio( this.renderer.getPixelRatio() );
         this.composer.addPass( new RenderPass( this.scene, this.arrayCamera ) );
-        this.composer.addPass( new AveragingPass() );
-        this.composer.passes[ 1 ].uniforms.views.value = this.numViews;
-        this.composer.passes[ 1 ].uniforms.renderToScreen = true;
-        this.composer.addPass( new OutputPass() );
+        this.composer.addPass( new AveragingPass(this.numViews) );
+        //this.composer.passes[ 1 ].uniforms.renderToScreen = true;
+        //this.composer.addPass( new OutputPass() );
     }
 
     render(deltaTime) {
@@ -79,9 +78,9 @@ export default class PhysicalDoFCamera {
 }
 
 class AveragingPass extends Pass {
-	constructor( ) {
+	constructor(views ) {
 		super();
-		this.uniforms = { 'tDiffuse': { value: null }, 'views': { value: 10 } };
+		this.uniforms = { 'tDiffuse': { value: null }, 'views': { value: views } };
 		this.material = new THREE.ShaderMaterial( {
 			uniforms: this.uniforms,
 			vertexShader: `
@@ -107,18 +106,19 @@ class AveragingPass extends Pass {
                 }`
 		} );
 
-		this.copyFsMaterial = new THREE.ShaderMaterial( {
-			uniforms: THREE.UniformsUtils.clone( CopyShader.uniforms ),
-			vertexShader: CopyShader.vertexShader,
-			fragmentShader: CopyShader.fragmentShader,
-			blending: THREE.NoBlending,
-			depthTest: false,
-			depthWrite: false
-		} );
-		this.fsQuad     = new FullScreenQuad( this.material );
+		//this.copyFsMaterial = new THREE.ShaderMaterial( {
+		//	uniforms: THREE.UniformsUtils.clone( CopyShader.uniforms ),
+		//	vertexShader: CopyShader.vertexShader,
+		//	fragmentShader: CopyShader.fragmentShader,
+		//	blending: THREE.NoBlending,
+		//	depthTest: false,
+		//	depthWrite: false
+		//} );
+		this.fsQuad = new FullScreenQuad( this.material );
 	}
 	render( renderer, writeBuffer, readBuffer /*, deltaTime, maskActive */ ) {
 		this.uniforms[ 'tDiffuse' ].value = readBuffer.texture;
+        this.material.needsUpdate = true;
 		if ( this.renderToScreen ) {
 			renderer.setRenderTarget( null );
 			this.fsQuad.render( renderer );

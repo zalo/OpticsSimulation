@@ -69,7 +69,7 @@ export default class World {
 
         // renderer
         this.renderer = new THREE.WebGLRenderer( { antialias: true } ); //, alpha: true
-        this.renderer.setPixelRatio( window.devicePixelRatio );
+        this.renderer.setPixelRatio( 1.0 );//window.devicePixelRatio );
         this.renderer.shadowMap.enabled = true;
         this.container.appendChild(this.renderer.domElement);
         this.renderer.setAnimationLoop(mainObject.update.bind(mainObject));

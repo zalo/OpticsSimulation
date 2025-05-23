@@ -1,9 +1,14 @@
 {
 	"scripts": {
-		"build": "esbuild ./src/main.js --bundle --minify --sourcemap --format=esm --outdir=./build"
+		"build": "esbuild ./src/main.js --bundle --minify --sourcemap --format=esm --outdir=./build",
+		"test": "node test.js"
 	},
 	"dependencies": {
 		"esbuild": "^0.25.2",
 		"three": "^0.175.0"
+	},
+	"devDependencies": {
+		"http-server": "^14.1.1",
+		"puppeteer": "^24.9.0"
 	}
 }

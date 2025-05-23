@@ -180,3 +180,4 @@ export default class Main {
 }
 
 var main = new Main();
+window.main = main;

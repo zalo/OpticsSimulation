@@ -99,7 +99,7 @@ export default class Main {
                                         rayDirection = refractedRay;
                                         if ( intersectRaySphere( rayOrigin, rayDirection, vec4(c2, r2), 1.0, t ) ) {
                                             rayOrigin = rayOrigin + t * rayDirection;
-                                            normal = normalize( rayOrigin - c2 );
+                                            normal = -normalize( rayOrigin - c2 );
                                             refractedRay = refract( rayDirection, normal, refractiveIndex / 1.0 );
                                             if ( refractedRay != vec3(0.0) ) {
                                                 rayDirection = refractedRay;
@@ -108,7 +108,7 @@ export default class Main {
                                     }
                                 } else if ( intersectRaySphere( rayOrigin, rayDirection, vec4(c2, r2), -1.0, t ) ) {
                                     vec3 intersection = rayOrigin + t * rayDirection;
-                                    if( length(intersection - c1) < r2 ) {
+                                    if( length(intersection - c1) < r1 ) {
                                         rayOrigin = intersection;
                                         vec3 normal = normalize( rayOrigin - c2 );
                                         vec3 refractedRay = refract( rayDirection, normal, 1.0 / refractiveIndex );
@@ -116,7 +116,7 @@ export default class Main {
                                             rayDirection = refractedRay;
                                             if ( intersectRaySphere( rayOrigin, rayDirection, vec4(c1, r1), 1.0, t ) ) {
                                                 rayOrigin = rayOrigin + t * rayDirection;
-                                                normal = normalize( rayOrigin - c1 );
+                                                normal = -normalize( rayOrigin - c1 );
                                                 refractedRay = refract( rayDirection, normal, refractiveIndex / 1.0 );
                                                 if ( refractedRay != vec3(0.0) ) {
                                                     rayDirection = refractedRay;

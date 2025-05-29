@@ -35,6 +35,10 @@ export default class Main {
             focus2Z: 0.0,
             minorRadius: 0.3,
             ellipsoidInside: false,
+            mirrorEnabled: true,
+            mirrorPosition: { x: 0.0, y: 0.0, z: -1.0 },
+            mirrorNormal: { x: 0.0, y: 0.0, z: 1.0 },
+            mirrorRadius: 0.5
         };
         this.gui = new GUI();
         this.gui.add(this.simulationParams, 'numViews', 1, 10, 1).name('Number of Views')           .onChange((value) => { this.physicalCamera.numViews      = value; this.physicalCamera.setupCamera(); });
@@ -52,6 +56,16 @@ export default class Main {
         ellipsoidFolder.add(this.simulationParams, 'focus2Z', -3.0, 3.0, 0.01).name('Focus 2 Z').onChange((value) => { this.raytracedShaderMaterial.uniforms.focus2Z.value = value; });
         ellipsoidFolder.add(this.simulationParams, 'minorRadius', 0.1, 2.0, 0.01).name('Minor Radius').onChange((value) => { this.raytracedShaderMaterial.uniforms.minorRadius.value = value; });
         ellipsoidFolder.add(this.simulationParams, 'ellipsoidInside').name('Inside Surface').onChange((value) => { this.raytracedShaderMaterial.uniforms.ellipsoidInside.value = value; });
+        // Mirror controls
+        const mirrorFolder = this.gui.addFolder('Planar Mirror');
+        mirrorFolder.add(this.simulationParams, 'mirrorEnabled').name('Enable Mirror').onChange((value) => { this.raytracedShaderMaterial.uniforms.mirrorEnabled.value = value; });
+        mirrorFolder.add(this.simulationParams.mirrorPosition, 'x', -3.0, 3.0, 0.01).name('Position X').onChange((value) => { this.raytracedShaderMaterial.uniforms.mirrorPosition.value.x = value; });
+        mirrorFolder.add(this.simulationParams.mirrorPosition, 'y', -3.0, 3.0, 0.01).name('Position Y').onChange((value) => { this.raytracedShaderMaterial.uniforms.mirrorPosition.value.y = value; });
+        mirrorFolder.add(this.simulationParams.mirrorPosition, 'z', -3.0, 3.0, 0.01).name('Position Z').onChange((value) => { this.raytracedShaderMaterial.uniforms.mirrorPosition.value.z = value; });
+        mirrorFolder.add(this.simulationParams.mirrorNormal, 'x', -1.0, 1.0, 0.01).name('Normal X').onChange((value) => { this.updateMirrorNormal(); });
+        mirrorFolder.add(this.simulationParams.mirrorNormal, 'y', -1.0, 1.0, 0.01).name('Normal Y').onChange((value) => { this.updateMirrorNormal(); });
+        mirrorFolder.add(this.simulationParams.mirrorNormal, 'z', -1.0, 1.0, 0.01).name('Normal Z').onChange((value) => { this.updateMirrorNormal(); });
+        mirrorFolder.add(this.simulationParams, 'mirrorRadius', 0.1, 2.0, 0.01).name('Mirror Radius').onChange((value) => { this.raytracedShaderMaterial.uniforms.mirrorRadius.value = value; });
 
         // Construct the render world
         this.world = new World(this);
@@ -80,6 +94,10 @@ export default class Main {
                         focus2Z: { value: this.simulationParams.focus2Z },
                         minorRadius: { value: this.simulationParams.minorRadius },
                         ellipsoidInside: { value: this.simulationParams.ellipsoidInside },
+                        mirrorEnabled: { value: this.simulationParams.mirrorEnabled },
+                        mirrorPosition: { value: new THREE.Vector3(this.simulationParams.mirrorPosition.x, this.simulationParams.mirrorPosition.y, this.simulationParams.mirrorPosition.z) },
+                        mirrorNormal: { value: new THREE.Vector3(this.simulationParams.mirrorNormal.x, this.simulationParams.mirrorNormal.y, this.simulationParams.mirrorNormal.z).normalize() },
+                        mirrorRadius: { value: this.simulationParams.mirrorRadius },
                         //map                 : { value: eyeRenderTarget.texture     },
                         //envMap   : { value: this.world.scene.background },
                     },
@@ -101,6 +119,10 @@ export default class Main {
                         uniform float focus2Z;
                         uniform float minorRadius;
                         uniform bool ellipsoidInside;
+                        uniform bool mirrorEnabled;
+                        uniform vec3 mirrorPosition;
+                        uniform vec3 mirrorNormal;
+                        uniform float mirrorRadius;
                         varying vec3 vWorldPosition;
 
                         bool intersectRaySphere( vec3 ro, vec3 rd, vec4 sph, float isInside, out float t ) {
@@ -113,11 +135,34 @@ export default class Main {
                             return true;
                         }
                         
+                        bool intersectRayPlane( vec3 rayOrigin, vec3 rayDirection, vec3 planePoint, vec3 planeNormal, out float t ) {
+                            float denom = dot(planeNormal, rayDirection);
+                            if (abs(denom) < 1e-6) { return false; } // Ray is parallel to plane
+                            
+                            vec3 p0l0 = planePoint - rayOrigin;
+                            t = dot(p0l0, planeNormal) / denom;
+                            return t >= 0.0; // Only positive intersections (forward ray)
+                        }
+                        
                         void reflectOffSphere( inout vec3 rayOrigin, inout vec3 rayDirection, vec4 sphereParams ) {
                             float t = 0.0;
                             if ( intersectRaySphere( rayOrigin, rayDirection, sphereParams, -1.0, t ) ) {
                                 rayOrigin = rayOrigin + t * rayDirection;
                                 rayDirection = reflect( rayDirection, normalize( rayOrigin - sphereParams.xyz ) );
+                            }
+                        }
+                        
+                        void reflectOffPlanarMirror( inout vec3 rayOrigin, inout vec3 rayDirection, vec3 mirrorPos, vec3 mirrorNorm, float radius ) {
+                            float t = 0.0;
+                            if ( intersectRayPlane( rayOrigin, rayDirection, mirrorPos, mirrorNorm, t ) ) {
+                                vec3 intersectionPoint = rayOrigin + t * rayDirection;
+                                
+                                // Check if intersection point is within the circular mirror bounds
+                                float distanceFromCenter = length(intersectionPoint - mirrorPos);
+                                if (distanceFromCenter <= radius) {
+                                    rayOrigin = intersectionPoint;
+                                    rayDirection = reflect( rayDirection, mirrorNorm );
+                                }
                             }
                         }
 
@@ -236,11 +281,21 @@ export default class Main {
                             vec3 rayDirection = normalize(vWorldPosition - cameraPosition );
                             vec3 rayOrigin    = cameraPosition;
 
-                            //reflectOffSphere( rayOrigin, rayDirection, vec4(  0.25, 0.0, 0.0, 0.25);
+                            
+                            // Apply planar mirror reflection if enabled
+                            if (mirrorEnabled) {
+                                reflectOffPlanarMirror( rayOrigin, rayDirection, mirrorPosition, mirrorNormal, mirrorRadius );
+                            }
+
+                            //reflectOffSphere( rayOrigin, rayDirection, vec4(  0.25, 0.0, 0.0, 0.25));
                             //reflectOffSphere( rayOrigin, rayDirection, vec4( -0.25, 0.0, 0.0, 0.25 ));
-                            refractBiconvexLens( rayOrigin, rayDirection, refractiveIndex, vec3( 0.4, 0.0, 0.0 ), 0.5, vec3( -0.4, 0.0, 0.0 ), 0.5 );
+
+                            refractBiconvexLens( rayOrigin, rayDirection, refractiveIndex, vec3( 0.4, 0.0, -0.0 ), 0.5, vec3( -0.4, 0.0, -0.0 ), 0.5 );
                             
                             reflectOffEllipsoid( rayOrigin, rayDirection, vec3( focus1X, focus1Y, focus1Z ), vec3( focus2X, focus2Y, focus2Z ), minorRadius, ellipsoidInside );
+
+
+
 
                             gl_FragColor = texture( envMap, rayDirection ); //vec4(rayDirection, 1.0);//
 
@@ -258,6 +313,18 @@ export default class Main {
                 this.world.scene.add( this.mesh );
 
 			});
+    }
+
+    /** Update the mirror normal vector and normalize it */
+    updateMirrorNormal() {
+        if (this.raytracedShaderMaterial) {
+            const normal = new THREE.Vector3(
+                this.simulationParams.mirrorNormal.x,
+                this.simulationParams.mirrorNormal.y,
+                this.simulationParams.mirrorNormal.z
+            ).normalize();
+            this.raytracedShaderMaterial.uniforms.mirrorNormal.value = normal;
+        }
     }
 
     /** Update the simulation */

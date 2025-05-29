@@ -18,7 +18,7 @@ export default class World {
         this.scene.background = new THREE.Color( 0x000000 );
 
         this.camera = new THREE.PerspectiveCamera( 60, window.innerWidth / window.innerHeight, 0.01, 1000 );
-        this.camera.position.set( -1.0, 1, 1 );
+        this.camera.position.set( 1.0, 1, 1 );
         this.camera.layers.enableAll();
         this.scene.add(this.camera);
 

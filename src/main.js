@@ -25,27 +25,13 @@ export default class Main {
             numViews: 4,
             resolution: 4096,
             aperture: 0.05,
-            focalDistance: 1.73,
-            mirrorEnabled: true,
-            mirrorPosition: { x: 0.0, y: 0.0, z: 0.0 },
-            mirrorNormal: { x: 1.0, y: 0.0, z: 0.0 },
-            mirrorRadius: 0.25
+            focalDistance: 1.27
         };
         this.gui = new GUI();
         this.gui.add(this.simulationParams, 'numViews', 1, 10, 1).name('Number of Views')           .onChange((value) => { this.physicalCamera.numViews      = value; this.physicalCamera.setupCamera(); });
         this.gui.add(this.simulationParams, 'resolution', 256, 4096, 256).name('Resolution')        .onChange((value) => { this.physicalCamera.resolution    = value; this.physicalCamera.setupCamera(); });
         this.gui.add(this.simulationParams, 'aperture', 0.0, 0.1, 0.01).name('Aperture Size')       .onChange((value) => { this.physicalCamera.aperture      = value; this.physicalCamera.setupCamera(); });
         this.gui.add(this.simulationParams, 'focalDistance', 0.4, 5.0, 0.01).name('Focal Distance').onChange((value) => { this.physicalCamera.focalDistance = value; this.physicalCamera.setupCamera(); });
-        // Mirror controls
-        const mirrorFolder = this.gui.addFolder('Planar Mirror');
-        mirrorFolder.add(this.simulationParams, 'mirrorEnabled').name('Enable Mirror').onChange((value) => { this.raytracedShaderMaterial.uniforms.mirrorEnabled.value = value; });
-        mirrorFolder.add(this.simulationParams.mirrorPosition, 'x', -3.0, 3.0, 0.01).name('Position X').onChange((value) => { this.raytracedShaderMaterial.uniforms.mirrorPosition.value.x = value; });
-        mirrorFolder.add(this.simulationParams.mirrorPosition, 'y', -3.0, 3.0, 0.01).name('Position Y').onChange((value) => { this.raytracedShaderMaterial.uniforms.mirrorPosition.value.y = value; });
-        mirrorFolder.add(this.simulationParams.mirrorPosition, 'z', -3.0, 3.0, 0.01).name('Position Z').onChange((value) => { this.raytracedShaderMaterial.uniforms.mirrorPosition.value.z = value; });
-        mirrorFolder.add(this.simulationParams.mirrorNormal, 'x', -1.0, 1.0, 0.01).name('Normal X').onChange((value) => { this.updateMirrorNormal(); });
-        mirrorFolder.add(this.simulationParams.mirrorNormal, 'y', -1.0, 1.0, 0.01).name('Normal Y').onChange((value) => { this.updateMirrorNormal(); });
-        mirrorFolder.add(this.simulationParams.mirrorNormal, 'z', -1.0, 1.0, 0.01).name('Normal Z').onChange((value) => { this.updateMirrorNormal(); });
-        mirrorFolder.add(this.simulationParams, 'mirrorRadius', 0.1, 2.0, 0.01).name('Mirror Radius').onChange((value) => { this.raytracedShaderMaterial.uniforms.mirrorRadius.value = value; });
 
         // Construct the render world
         this.world = new World(this);
@@ -65,10 +51,6 @@ export default class Main {
                 this.raytracedShaderMaterial = new THREE.ShaderMaterial( {
                     side: THREE.DoubleSide,
                     uniforms: {
-                        mirrorEnabled: { value: this.simulationParams.mirrorEnabled },
-                        mirrorPosition: { value: new THREE.Vector3(this.simulationParams.mirrorPosition.x, this.simulationParams.mirrorPosition.y, this.simulationParams.mirrorPosition.z) },
-                        mirrorNormal: { value: new THREE.Vector3(this.simulationParams.mirrorNormal.x, this.simulationParams.mirrorNormal.y, this.simulationParams.mirrorNormal.z).normalize() },
-                        mirrorRadius: { value: this.simulationParams.mirrorRadius },
                         //map                 : { value: eyeRenderTarget.texture     },
                         //envMap   : { value: this.world.scene.background },
                     },
@@ -81,10 +63,6 @@ export default class Main {
                         }`,
                     fragmentShader: `
                         uniform samplerCube envMap;
-                        uniform bool mirrorEnabled;
-                        uniform vec3 mirrorPosition;
-                        uniform vec3 mirrorNormal;
-                        uniform float mirrorRadius;
                         varying vec3 vWorldPosition;
 
                         bool intersectRaySphere( vec3 ro, vec3 rd, vec4 sph, float isInside, out float t ) {
@@ -127,21 +105,72 @@ export default class Main {
                                 }
                             }
                         }
+                        
+                        mat3 rotationMatrix(vec3 euler) {
+                            float cx = cos(euler.x);
+                            float sx = sin(euler.x);
+                            float cy = cos(euler.y);
+                            float sy = sin(euler.y);
+                            float cz = cos(euler.z);
+                            float sz = sin(euler.z);
+                            
+                            mat3 rotX = mat3(1.0, 0.0, 0.0, 0.0, cx, -sx, 0.0, sx, cx);
+                            mat3 rotY = mat3(cy, 0.0, sy, 0.0, 1.0, 0.0, -sy, 0.0, cy);
+                            mat3 rotZ = mat3(cz, -sz, 0.0, sz, cz, 0.0, 0.0, 0.0, 1.0);
+                            
+                            return rotZ * rotY * rotX;
+                        }
+                        
+                        bool intersectRayQuad( vec3 rayOrigin, vec3 rayDirection, vec3 quadPos, vec3 quadRot, vec2 quadSize, out float t, out vec3 hitColor ) {
+                            mat3 rotation = rotationMatrix(quadRot);
+                            vec3 quadNormal = rotation * vec3(0.0, 0.0, 1.0);
+                            
+                            // Intersect with the plane containing the quad
+                            if (!intersectRayPlane(rayOrigin, rayDirection, quadPos, quadNormal, t)) {
+                                return false;
+                            }
+                            
+                            vec3 intersectionPoint = rayOrigin + t * rayDirection;
+                            vec3 localPoint = intersectionPoint - quadPos;
+                            
+                            // Transform to quad's local coordinate system
+                            vec3 localU = rotation * vec3(1.0, 0.0, 0.0);
+                            vec3 localV = rotation * vec3(0.0, 1.0, 0.0);
+                            
+                            float u = dot(localPoint, localU);
+                            float v = dot(localPoint, localV);
+                            
+                            // Check if intersection is within quad bounds
+                            if (abs(u) <= quadSize.x * 0.5 && abs(v) <= quadSize.y * 0.5) {
+                                // Create a simple checkerboard pattern
+                                float checkerSize = 0.01;
+                                float checkU = floor((u + quadSize.x * 0.5) / checkerSize);
+                                float checkV = floor((v + quadSize.y * 0.5) / checkerSize);
+                                float checker = mod(checkU + checkV, 2.0);
+                                hitColor = mix(vec3(0.8, 0.2, 0.2), vec3(0.2, 0.8, 0.2), checker);
+                                return true;
+                            }
+                            
+                            return false;
+                        }
 
                         void main() {
                             vec3 rayDirection = normalize(vWorldPosition - cameraPosition );
                             vec3 rayOrigin    = cameraPosition;
+                        
+                            // Reflect off of the two planes of a periscope
+                            reflectOffPlanarMirror( rayOrigin, rayDirection, vec3(0.0,0.4,0.0), normalize(vec3(1.0, 1.0, 0.0)), 0.25 );
+                            reflectOffPlanarMirror( rayOrigin, rayDirection, vec3(0.0,0.8,0.0), normalize(vec3(1.0, 1.0, 0.0)), 0.25 );
 
-                            
-                            // Apply planar mirror reflection if enabled
-                            if (mirrorEnabled) {
-                                reflectOffPlanarMirror( rayOrigin, rayDirection, mirrorPosition, mirrorNormal, mirrorRadius );
+                            // Check for intersection with the image quad
+                            float quadT = 0.0;
+                            vec3 quadColor = vec3(0.0);
+                            if (intersectRayQuad(rayOrigin, rayDirection, vec3(-0.4, 0.8, 0.0), vec3(0.0, 3.14159*0.5, 0.0), vec2(0.4, 0.4), quadT, quadColor)) {
+                                gl_FragColor = vec4(quadColor, 1.0);
+                            } else {
+                                // Otherwise just cast the ray into the background
+                                gl_FragColor = texture( envMap, rayDirection );
                             }
-
-                            //reflectOffSphere( rayOrigin, rayDirection, vec4(  0.25, 0.0, 0.0, 0.25));
-                            //reflectOffSphere( rayOrigin, rayDirection, vec4( -0.25, 0.0, 0.0, 0.25 ));
-
-                            gl_FragColor = texture( envMap, rayDirection ); //vec4(rayDirection, 1.0);//
 
                             #include <tonemapping_fragment>
                             #include <colorspace_fragment>

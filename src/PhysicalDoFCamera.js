@@ -15,7 +15,7 @@ export default class PhysicalDoFCamera {
         this.numViews      = 4;
         this.resolution    = 4096;
         this.aperture      = 0.05;
-        this.focalDistance = 1.73;
+        this.focalDistance = 1.27;
 
         this.setupCamera();
     }

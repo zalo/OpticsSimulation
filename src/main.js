@@ -106,6 +106,64 @@ export default class Main {
                             }
                         }
                         
+                        float dot2( in vec3 v ) { return dot(v,v); }
+
+                        vec4 iCappedCone( in vec3  ro, in vec3  rd, 
+                                        in vec3  pa, in vec3  pb, 
+                                        in float ra, in float rb, 
+                                        in bool frontSurface ) {
+                            vec3  ba = pb - pa;
+                            vec3  oa = ro - pa;
+                            vec3  ob = ro - pb;
+                            
+                            float m0 = dot(ba,ba);
+                            float m1 = dot(oa,ba);
+                            float m2 = dot(ob,ba); 
+                            float m3 = dot(rd,ba);
+
+                            ////caps
+                            //    if( m1<0.0 ) { if( dot2(oa*m3-rd*m1)<(ra*ra*m3*m3) ) return vec4(-m1/m3,-ba*inversesqrt(m0)); }
+                            //else if( m2>0.0 ) { if( dot2(ob*m3-rd*m2)<(rb*rb*m3*m3) ) return vec4(-m2/m3, ba*inversesqrt(m0)); }
+                            
+                            // body
+                            float m4 = dot(rd,oa);
+                            float m5 = dot(oa,oa);
+                            float rr = ra - rb;
+                            float hy = m0 + rr*rr;
+                            
+                            float k2 = m0*m0    - m3*m3*hy;
+                            float k1 = m0*m0*m4 - m1*m3*hy + m0*ra*(rr*m3*1.0        );
+                            float k0 = m0*m0*m5 - m1*m1*hy + m0*ra*(rr*m1*2.0 - m0*ra);
+                            
+                            float h = k1*k1 - k2*k0;
+                            if( h<0.0 ) return vec4(-1.0);
+
+                            float t1 = (-k1-sqrt(h))/k2;
+                            float t2 = (-k1+sqrt(h))/k2;
+                            
+                            float t = frontSurface ? t1 : t2;
+                            
+                            // Check if t is valid and within cone bounds
+                            if( t > 0.0 ) {
+                                float y = m1 + t*m3;
+                                if( y>0.0 && y<m0 ) 
+                                {
+                                    vec3 normal = normalize(m0*(m0*(oa+t*rd)+rr*ba*ra)-ba*hy*y);
+                                    return vec4(t, frontSurface ? normal : -normal);
+                                }
+                            }
+                            
+                            return vec4(-1.0);
+                        }
+
+                        void reflectOffCone( inout vec3 rayOrigin, inout vec3 rayDirection, vec3 coneA, vec3 coneB, float radiusA, float radiusB, bool frontSurface ) {
+                            vec4 coneHit = iCappedCone( rayOrigin, rayDirection, coneA, coneB, radiusA, radiusB, frontSurface );
+                            if ( coneHit.x > 0.0 ) {
+                                rayOrigin = rayOrigin + coneHit.x * rayDirection;
+                                rayDirection = reflect( rayDirection, coneHit.yzw );
+                            }
+                        }
+                        
                         mat3 rotationMatrix(vec3 euler) {
                             float cx = cos(euler.x);
                             float sx = sin(euler.x);
@@ -159,8 +217,13 @@ export default class Main {
                             vec3 rayOrigin    = cameraPosition;
                         
                             // Reflect off of the two planes of a periscope
-                            reflectOffPlanarMirror( rayOrigin, rayDirection, vec3(0.0,0.4,0.0), normalize(vec3(1.0, 1.0, 0.0)), 0.25 );
-                            reflectOffPlanarMirror( rayOrigin, rayDirection, vec3(0.0,0.8,0.0), normalize(vec3(1.0, 1.0, 0.0)), 0.25 );
+                            //reflectOffPlanarMirror( rayOrigin, rayDirection, vec3(0.0,0.4,0.0), normalize(vec3(1.0, 1.0, 0.0)), 0.25 );
+                            //reflectOffPlanarMirror( rayOrigin, rayDirection, vec3(0.0,0.8,0.0), normalize(vec3(1.0, 1.0, 0.0)), 0.25 );
+                            
+                            // Reflect off cone reflector
+                            reflectOffCone( rayOrigin, rayDirection, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.5, 0.0), 0.3, 0.3, false );
+
+                            reflectOffCone( rayOrigin, rayDirection, vec3(-0.25, 0.8, 0.0), vec3(0.25, 0.8, 0.0), 0.3, 0.3, false );
 
                             // Check for intersection with the image quad
                             float quadT = 0.0;

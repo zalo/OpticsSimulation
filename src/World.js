@@ -17,8 +17,8 @@ export default class World {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color( 0x000000 );
 
-        this.camera = new THREE.PerspectiveCamera( 60, window.innerWidth / window.innerHeight, 0.01, 1000 );
-        this.camera.position.set( 0.5, 0.3, 0.0 );
+        this.camera = new THREE.PerspectiveCamera( 90, window.innerWidth / window.innerHeight, 0.01, 1000 );
+        this.camera.position.set( 1.0, 0.1, 0.0 );
         this.camera.layers.enableAll();
         this.scene.add(this.camera);
 
@@ -61,11 +61,11 @@ export default class World {
         //this.ground.receiveShadow = true;
         //this.scene.add( this.ground );
         
-        this.helper = new THREE.GridHelper( 2, 20 );
-        this.helper.material.opacity = 1.0;
-        this.helper.material.transparent = true;
-        this.helper.position.set(0, 0.005, 0);
-        this.scene.add( this.helper );
+        //this.helper = new THREE.GridHelper( 2, 20 );
+        //this.helper.material.opacity = 1.0;
+        //this.helper.material.transparent = true;
+        //this.helper.position.set(0, 0.005, 0);
+        //this.scene.add( this.helper );
 
         // renderer
         this.renderer = new THREE.WebGLRenderer( { antialias: true } ); //, alpha: true
@@ -79,7 +79,7 @@ export default class World {
         this._onWindowResize();
 
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-        this.controls.target.set(0, 0.3, 0);
+        this.controls.target.set(0, 0.1, 0);
         this.controls.panSpeed = 2;
         this.controls.zoomSpeed = 1;
         this.controls.enableDamping = true;

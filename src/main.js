@@ -41,6 +41,25 @@ export default class Main {
 
         // Construct the render world
         this.world = new World(this);
+
+        this.objectScene = new THREE.Scene();
+        this.objectCamera = new THREE.OrthographicCamera( -0.6, 0.6, 0.6, -0.6, 0.01, 100 );
+        this.objectCamera.position.set( 0.0, 3, 0.0 );
+        this.objectCamera.lookAt(0, 0, 0);
+        this.objectCamera.layers.enableAll();
+        this.objectScene.add(this.objectCamera);
+        this.rtTexture = new THREE.WebGLRenderTarget( 2048, 2048, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat } );
+        this.spotLight = new THREE.SpotLight( 0xffffff, Math.PI * 10.0 );
+        this.spotLight.angle = Math.PI / 5;
+        this.spotLight.penumbra = 0.2;
+        this.spotLight.position.set( -2, 3, -3 );
+        this.objectScene.add( this.spotLight );
+        this.dirLight = new THREE.DirectionalLight( 0x55505a, Math.PI * 10.0 );
+        this.dirLight.position.set( 0, 3, 0 );
+        this.objectScene.add( this.dirLight );
+        this.hemiLight = new THREE.HemisphereLight( 0xffffff, 0x444444 );
+        this.hemiLight.position.set( 0, 20, 0 );
+        this.objectScene.add( this.hemiLight );
         
         // Draw the slit line segment
         let points = [new THREE.Vector3(0, 0, 0.75), new THREE.Vector3(0, 0.25, 0.75)];
@@ -63,7 +82,7 @@ export default class Main {
             this.mesh = gltf.scene.children[0];
             this.mesh.position.set(0, 0.05, 0);
             this.mesh.scale.set(0.9, 0.9, 0.9);
-            this.world.scene.add(this.mesh);
+            this.objectScene.add(this.mesh);
             this.mesh.frustumCulled = false
 
             this.mesh.material.side = THREE.BackSide;
@@ -75,7 +94,7 @@ export default class Main {
             };
             this.meshes.push(this.mesh);
 
-            for(let i = 0; i < 7; i++){
+            for(let i = 0; i < 14; i++){
                 let mesh2 = this.mesh.clone();
                 mesh2.material = this.mesh.material.clone();
                 mesh2.material.uniforms = { slitAngle : { value: this.slitAngle + Math.PI } };
@@ -84,7 +103,7 @@ export default class Main {
                     shader.uniforms.slitAngle = mesh2.material.uniforms.slitAngle;
                     mesh2.material.userData.shader = shader;
                 };
-                this.world.scene.add(mesh2);
+                this.objectScene.add(mesh2);
                 this.meshes.push(mesh2);
             }
         });
@@ -109,8 +128,8 @@ export default class Main {
                 this.raytracedShaderMaterial = new THREE.ShaderMaterial( {
                     side: THREE.DoubleSide,
                     uniforms: {
-                        //map                 : { value: eyeRenderTarget.texture     },
                         //envMap   : { value: this.world.scene.background },
+                        map      : { value: this.rtTexture.texture      }
                     },
                     vertexShader  : `
                         varying vec3 vWorldPosition;
@@ -120,7 +139,8 @@ export default class Main {
                             vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
                         }`,
                     fragmentShader: `
-                        uniform samplerCube envMap;
+                        uniform sampler2D map;
+                        //uniform samplerCube envMap;
                         varying vec3 vWorldPosition;
 
                         bool intersectRaySphere( vec3 ro, vec3 rd, vec4 sph, float isInside, out float t ) {
@@ -215,7 +235,7 @@ export default class Main {
                             return rotZ * rotY * rotX;
                         }
                         
-                        bool intersectRayQuad( vec3 rayOrigin, vec3 rayDirection, vec3 quadPos, vec3 quadRot, vec2 quadSize, out float t, out vec3 hitColor ) {
+                        bool intersectRayQuad( vec3 rayOrigin, vec3 rayDirection, vec3 quadPos, vec3 quadRot, vec2 quadSize, out float t, out vec3 hitColor, out vec2 hitUV ) {
                             mat3 rotation = rotationMatrix(quadRot);
                             vec3 quadNormal = rotation * vec3(0.0, 0.0, 1.0);
                             
@@ -233,6 +253,7 @@ export default class Main {
                             
                             float u = dot(localPoint, localU);
                             float v = dot(localPoint, localV);
+                            hitUV = vec2(u + quadSize.x * 0.5, v + quadSize.y * 0.5) / quadSize;
                             
                             // Check if intersection is within quad bounds
                             if (abs(u) <= quadSize.x * 0.5 && abs(v) <= quadSize.y * 0.5) {
@@ -256,12 +277,13 @@ export default class Main {
 
                             // Check for intersection with the image quad
                             float quadT = 0.0;
+                            vec2 hitUV = vec2(0.0);
                             vec3 quadColor = vec3(0.0);
-                            if (intersectRayQuad(rayOrigin, rayDirection, vec3(0.0, 0.0, 0.0), vec3(3.14159*0.5, 0.0, 0.0), vec2(1.2, 1.2), quadT, quadColor)) {
-                                gl_FragColor = vec4(quadColor, 1.0);
+                            if (intersectRayQuad(rayOrigin, rayDirection, vec3(0.0, 0.0, 0.0), vec3(3.14159*0.5, 0.0, 0.0), vec2(1.2, 1.2), quadT, quadColor, hitUV)) {
+                                gl_FragColor = texture( map, hitUV);
                             } else {
                                 // Otherwise just cast the ray into the background
-                                gl_FragColor = texture( envMap, rayDirection );
+                                //gl_FragColor = texture( envMap, rayDirection );
                             }
 
                             #include <tonemapping_fragment>
@@ -273,9 +295,9 @@ export default class Main {
                 } );
 
                 // Create a plane to render the raytraced shader material
-                this.planeGeometry = new THREE.SphereGeometry( 5.5, 32, 32 );
-                this.mesh = new THREE.Mesh( this.planeGeometry, this.raytracedShaderMaterial );
-                this.world.scene.add( this.mesh );
+                this.sphereGeometry = new THREE.SphereGeometry( 5.5, 32, 32 );
+                this.raytraceMesh = new THREE.Mesh( this.sphereGeometry, this.raytracedShaderMaterial );
+                this.world.scene.add( this.raytraceMesh );
 
 			});
     }
@@ -396,10 +418,10 @@ export default class Main {
     /** Update the simulation */
     update(timeMS) {
         if(this.physicalCamera){
-            this.deltaTime = timeMS - this.timeMS;
+            this.deltaTime = 1000.0/240.0;///timeMS - this.timeMS;
             this.timeMS = timeMS;
             if(this.mesh && this.mesh.material && this.mesh.material.uniforms && this.mesh.material.uniforms.slitAngle){
-                this.slitAngle = (this.slitAngle || 0) + (this.deltaTime / 1000.0) * Math.PI * 2.0;// * 6.0;
+                this.slitAngle = (this.slitAngle || 0) + (this.deltaTime / 1000.0) * Math.PI * 2.0 * 2.0;// * 6.0;
                 if(this.slitAngle > Math.PI * 2.0){ this.slitAngle -= Math.PI * 2.0; }
 
                 for(let i = 0; i < this.meshes.length; i++){
@@ -409,8 +431,18 @@ export default class Main {
                 }
             }
             this.world.controls.update();
-            this.physicalCamera.render( this.deltaTime / 1000.0 );
-            //this.world.renderer.render(this.world.scene, this.world.camera);
+
+			// Render first scene into texture
+			this.world.renderer.setRenderTarget( this.rtTexture );
+			this.world.renderer.clear();
+			this.world.renderer.render( this.objectScene, this.objectCamera );
+
+			// Render full screen quad with generated texture
+			this.world.renderer.setRenderTarget( null );
+			this.world.renderer.clear();
+
+            //this.physicalCamera.render( this.deltaTime / 1000.0 );
+            this.world.renderer.render(this.world.scene, this.world.camera);
             this.world.stats.update();
         }
     }

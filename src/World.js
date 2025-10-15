@@ -18,6 +18,7 @@ export default class World {
         this.scene.background = new THREE.Color( 0x000000 );
 
         this.camera = new THREE.PerspectiveCamera( 90, window.innerWidth / window.innerHeight, 0.01, 1000 );
+        //this.camera = new THREE.OrthographicCamera( -0.6, 0.6, 0.6, -0.6, 0.01, 100 );
         this.camera.position.set( 1.0, 0.1, 0.0 );
         this.camera.layers.enableAll();
         this.scene.add(this.camera);
@@ -74,6 +75,10 @@ export default class World {
         this.container.appendChild(this.renderer.domElement);
         this.renderer.setAnimationLoop(mainObject.update.bind(mainObject));
         this.renderer.setClearColor( 0x000000, 0 ); // the default
+        //this.renderer.toneMappingExposure = 1.0;
+        this.renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+        //this.renderer.physicallyCorrectLights = true;
+        //this.renderer.toneMapping = THREE.LinearToneMapping;
         window.addEventListener('resize', this._onWindowResize.bind(this), false);
         window.addEventListener('orientationchange', this._onWindowResize.bind(this), false);
         this._onWindowResize();

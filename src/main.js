@@ -24,14 +24,14 @@ export default class Main {
         this.simulationParams = {
             numViews: 4,
             resolution: 4096,
-            aperture: 0.05,
+            aperture: 0.005,
             focalDistance: 1.27
         };
         this.gui = new GUI();
         this.gui.add(this.simulationParams, 'numViews', 1, 10, 1).name('Number of Views')           .onChange((value) => { this.physicalCamera.numViews      = value; this.physicalCamera.setupCamera(); });
         this.gui.add(this.simulationParams, 'resolution', 256, 4096, 256).name('Resolution')        .onChange((value) => { this.physicalCamera.resolution    = value; this.physicalCamera.setupCamera(); });
         this.gui.add(this.simulationParams, 'aperture', 0.0, 0.1, 0.01).name('Aperture Size')       .onChange((value) => { this.physicalCamera.aperture      = value; this.physicalCamera.setupCamera(); });
-        this.gui.add(this.simulationParams, 'focalDistance', 0.4, 5.0, 0.01).name('Focal Distance').onChange((value) => { this.physicalCamera.focalDistance = value; this.physicalCamera.setupCamera(); });
+        this.gui.add(this.simulationParams, 'focalDistance', 0.4, 5.0, 0.01).name('Focal Distance') .onChange((value) => { this.physicalCamera.focalDistance = value; this.physicalCamera.setupCamera(); });
 
         // Construct the render world
         this.world = new World(this);
@@ -44,9 +44,14 @@ export default class Main {
 				this.world.scene.environment = texture;
 
                 this.physicalCamera = new PhysicalDoFCamera(this.world.renderer, this.world.scene, this.world.camera);
+                this.physicalCamera.numViews      = this.simulationParams.numViews;
+                this.physicalCamera.resolution    = this.simulationParams.resolution;
+                this.physicalCamera.aperture      = this.simulationParams.aperture;
+                this.physicalCamera.focalDistance = this.simulationParams.focalDistance;
+                this.physicalCamera.setupCamera();
                 window.addEventListener(           'resize', () => { this.physicalCamera.setupCamera(); }, false);
                 window.addEventListener('orientationchange', () => { this.physicalCamera.setupCamera(); }, false);
-
+                
                 // Create a new ShaderMaterial that raytraces against a biconvex lens
                 this.raytracedShaderMaterial = new THREE.ShaderMaterial( {
                     side: THREE.DoubleSide,
@@ -221,14 +226,14 @@ export default class Main {
                             //reflectOffPlanarMirror( rayOrigin, rayDirection, vec3(0.0,0.8,0.0), normalize(vec3(1.0, 1.0, 0.0)), 0.25 );
                             
                             // Reflect off cone reflector
-                            reflectOffCone( rayOrigin, rayDirection, vec3(0.0, 0.0, 0.0), vec3(0.0, 0.5, 0.0), 0.3, 0.3, false );
+                            reflectOffCone( rayOrigin, rayDirection, vec3(0.25, 0.0, 0.0), vec3(0.0, 0.5, 0.0), 0.2, 0.4, false );
 
-                            reflectOffCone( rayOrigin, rayDirection, vec3(-0.25, 0.8, 0.0), vec3(0.25, 0.8, 0.0), 0.3, 0.3, false );
+                            reflectOffCone( rayOrigin, rayDirection, vec3(0.0, 0.8, -0.25), vec3(0.0, 0.8, 0.25), 0.3, 0.3, true );
 
                             // Check for intersection with the image quad
                             float quadT = 0.0;
                             vec3 quadColor = vec3(0.0);
-                            if (intersectRayQuad(rayOrigin, rayDirection, vec3(-0.4, 0.8, 0.0), vec3(0.0, 3.14159*0.5, 0.0), vec2(0.4, 0.4), quadT, quadColor)) {
+                            if (intersectRayQuad(rayOrigin, rayDirection, vec3(-0.4, 0.4, 0.0), vec3(0.0, 3.14159*0.5, 0.0), vec2(0.4, 0.4), quadT, quadColor)) {
                                 gl_FragColor = vec4(quadColor, 1.0);
                             } else {
                                 // Otherwise just cast the ray into the background
